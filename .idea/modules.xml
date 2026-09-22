@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/jira_automation.iml" filepath="$PROJECT_DIR$/jira_automation.iml" />
+      <module fileurl="file://$PROJECT_DIR$/web_automation.iml" filepath="$PROJECT_DIR$/web_automation.iml" />
     </modules>
   </component>
 </project>
