@@ -5,6 +5,7 @@ import sys
 from csv import reader
 from datetime import datetime
 from pathlib import Path
+import re
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from uuid import uuid4
@@ -57,6 +58,20 @@ PREFERRED_COLUMN_ORDER = [
     "Updated",
     "Time to resolution",
     "Labels",
+]
+USER_STATUS_REPORT_USERS = [
+    "Ashish Dake",
+    "Rajkumar Kale",
+    "Narayan Mhaske",
+    "Pranav Soan",
+    "Rashmi Dubey",
+    "Deepak Gavel",
+    "Sajida Mullani",
+    "Mahesh Pujari",
+    "Ramamurthy Rongala",
+    "Namrata Shandilya",
+    "Rishabh Verma",
+    "Pooja Malage",
 ]
 
 
@@ -234,6 +249,68 @@ def create_status_counts() -> dict[str, int]:
     }
 
 
+def create_user_status_counts() -> dict[str, dict[str, int]]:
+    return {user: create_status_counts() for user in USER_STATUS_REPORT_USERS}
+
+
+def calculate_eod_ticket_count(status_counts: dict[str, int]) -> int:
+    return (
+        status_counts["work_in_progress"]
+        + status_counts["pending"]
+        + status_counts["waiting_for_user"]
+        + status_counts["waiting_for_acceptance"]
+    )
+
+
+def normalize_letters(value: str) -> str:
+    return re.sub(r"[^a-z]", "", value.lower())
+
+
+def get_user_name_parts(user_name: str) -> tuple[str, str]:
+    parts = re.findall(r"[a-z]+", user_name.lower())
+    if not parts:
+        return "", ""
+    return parts[0], parts[-1]
+
+
+def resolve_report_user_from_assignee(assignee: str) -> str | None:
+    normalized_assignee = normalize_letters(assignee)
+    if not normalized_assignee:
+        return None
+
+    for user_name in USER_STATUS_REPORT_USERS:
+        first_name, last_name = get_user_name_parts(user_name)
+        if first_name and last_name and first_name in normalized_assignee and last_name in normalized_assignee:
+            return user_name
+
+    return None
+
+
+def update_user_status_counts(
+    row: list[str],
+    assignee_index: int | None,
+    status_index: int | None,
+    user_status_counts: dict[str, dict[str, int]],
+) -> None:
+    if (
+        assignee_index is None
+        or assignee_index >= len(row)
+        or status_index is None
+        or status_index >= len(row)
+    ):
+        return
+
+    assignee = row[assignee_index].strip()
+    if not assignee:
+        return
+
+    report_user = resolve_report_user_from_assignee(assignee)
+    if report_user is None:
+        return
+
+    update_status_counts(row, status_index, user_status_counts[report_user])
+
+
 def update_status_counts(
     row: list[str], status_index: int | None, status_counts: dict[str, int]
 ) -> None:
@@ -271,14 +348,70 @@ def print_status_counts(sheet_name: str, status_counts: dict[str, int]) -> None:
     print(f"  Closed: {status_counts['closed']}")
 
 
+def print_user_status_counts_table(user_status_counts: dict[str, dict[str, int]]) -> None:
+    headers = [
+        "User",
+        "Work In Progress",
+        "Waiting For User",
+        "Pending",
+        "Waiting For Acceptance",
+        "Closed",
+        "EoD Ticket Count",
+    ]
+    rows = []
+    for user_name in USER_STATUS_REPORT_USERS:
+        status_counts = user_status_counts[user_name]
+        rows.append(
+            [
+                user_name,
+                str(status_counts["work_in_progress"]),
+                str(status_counts["waiting_for_user"]),
+                str(status_counts["pending"]),
+                str(status_counts["waiting_for_acceptance"]),
+                str(status_counts["closed"]),
+                str(calculate_eod_ticket_count(status_counts)),
+            ]
+        )
+
+    widths = [len(header) for header in headers]
+    for row in rows:
+        for index, cell_value in enumerate(row):
+            widths[index] = max(widths[index], len(cell_value))
+
+    separator = "+-" + "-+-".join("-" * width for width in widths) + "-+"
+
+    def format_row(cells: list[str]) -> str:
+        return "| " + " | ".join(
+            cell_value.ljust(widths[index]) for index, cell_value in enumerate(cells)
+        ) + " |"
+
+    print("User status table:")
+    print(separator)
+    print(format_row(headers))
+    print(separator)
+    for row in rows:
+        print(format_row(row))
+    print(separator)
+
+
 def send_status_counts_to_teams_webhook(
-    czsk_status_counts: dict[str, int], ukraine_status_counts: dict[str, int]
+    czsk_status_counts: dict[str, int],
+    ukraine_status_counts: dict[str, int],
+    user_status_counts: dict[str, dict[str, int]],
 ) -> None:
     print("Sending status counts to Teams webhook.")
+    users_payload: dict[str, dict[str, int]] = {}
+    for user_name, status_counts in user_status_counts.items():
+        users_payload[user_name] = {
+            **status_counts,
+            "eod_ticket_count": calculate_eod_ticket_count(status_counts),
+        }
+
     payload = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "czsk": czsk_status_counts,
         "ukraine": ukraine_status_counts,
+        "users": users_payload,
     }
     request = Request(
         TEAMS_WEBHOOK_URL,
@@ -345,6 +478,7 @@ def convert_csv_to_xlsx(csv_path: Path) -> Path:
     labels_output_index: int | None = None
     czsk_status_counts = create_status_counts()
     ukraine_status_counts = create_status_counts()
+    user_status_counts = create_user_status_counts()
     rows_read = 0
     rows_written = 0
 
@@ -454,12 +588,18 @@ def convert_csv_to_xlsx(csv_path: Path) -> Path:
                 rows_written += 1
                 if has_assigned_owner(filtered_row, assignee_index):
                     update_status_counts(filtered_row, status_index, czsk_status_counts)
+                    update_user_status_counts(
+                        filtered_row, assignee_index, status_index, user_status_counts
+                    )
             elif issue_key.startswith("SDMCCUA"):
                 print(f"Adding issue to Ukraine sheet: {issue_key}")
                 ukraine_sheet.append(filtered_row)
                 rows_written += 1
                 if has_assigned_owner(filtered_row, assignee_index):
                     update_status_counts(filtered_row, status_index, ukraine_status_counts)
+                    update_user_status_counts(
+                        filtered_row, assignee_index, status_index, user_status_counts
+                    )
             else:
                 print(
                     f"Issue key '{issue_key}' does not match supported project prefixes; "
@@ -469,6 +609,9 @@ def convert_csv_to_xlsx(csv_path: Path) -> Path:
                 rows_written += 1
                 if has_assigned_owner(filtered_row, assignee_index):
                     update_status_counts(filtered_row, status_index, czsk_status_counts)
+                    update_user_status_counts(
+                        filtered_row, assignee_index, status_index, user_status_counts
+                    )
 
     print(f"CSV rows read: {rows_read}")
     print(f"Rows written to workbook: {rows_written}")
@@ -477,7 +620,10 @@ def convert_csv_to_xlsx(csv_path: Path) -> Path:
     format_worksheet(ukraine_sheet)
     print_status_counts("CZ&SK", czsk_status_counts)
     print_status_counts("Ukraine", ukraine_status_counts)
-    send_status_counts_to_teams_webhook(czsk_status_counts, ukraine_status_counts)
+    print_user_status_counts_table(user_status_counts)
+    send_status_counts_to_teams_webhook(
+        czsk_status_counts, ukraine_status_counts, user_status_counts
+    )
 
     xlsx_path = csv_path.with_name(build_output_filename())
     print(f"Saving XLSX file: {xlsx_path}")
