@@ -1,5 +1,5 @@
 [project]
-name = "web-automation"
+name = "jira-automation"
 version = "0.1.0"
 description = "Add your description here"
 authors = [
@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
-web-automation = "web_automation:main"
+jira-automation = "jira_automation:main"
 
 [build-system]
 requires = ["uv_build>=0.12.1,<0.13.0"]
