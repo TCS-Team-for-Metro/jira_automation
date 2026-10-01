@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from base64 import b64encode
 import json
 import sys
 from csv import reader
@@ -19,7 +20,10 @@ from playwright.sync_api import sync_playwright
 JIRA_ISSUES_URL = "https://jira.metro.digital/login.jsp"
 CSV_DOWNLOAD_URL = "https://jira.metro.digital/sr/jira.issueviews:searchrequest-csv-current-fields/138300/SearchRequest-138300.csv"
 MICROSOFT_EMAIL = "ashish.dake@metro-external.digital"
-TEAMS_WEBHOOK_URL = "https://default6432230809a947a38c1cb82871d605.68.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/20/workflows/289b83477c334aed8041ef10975684d9/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=Toz9PMhNqx7-S8EKXaIK7rUAbHTdYjQzWLUiXGmd4y8"
+
+# ashish webhook url
+TEAMS_WEBHOOK_URL = "https://default6432230809a947a38c1cb82871d605.68.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/04/workflows/041ce55e623a4412a3fe802a9f0b8d50/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=EdDbu5Nh7253cYA9m_OFbrPMqdniRkFKkrZilzr5D-8"
+
 COLUMNS_TO_REMOVE = {
     "Issue id",
     "Project key",
@@ -30,7 +34,7 @@ COLUMNS_TO_REMOVE = {
 }
 ISSUE_KEY_COLUMN_INDEX = 0
 UNASSIGNED_VALUE = "Unassigned"
-WORK_IN_PROGRESS_STATUS_PARTS = ("open", "delegated", "feedback received")
+WORK_IN_PROGRESS_STATUS_PARTS = ("open", "delegated", "feedback received", "in analysis")
 PENDING_STATUS = "pending"
 WAITING_FOR_USER_STATUS = "waiting for user"
 WAITING_FOR_ACCEPTANCE_STATUS = "waiting for acceptance"
@@ -398,6 +402,7 @@ def send_status_counts_to_teams_webhook(
     czsk_status_counts: dict[str, int],
     ukraine_status_counts: dict[str, int],
     user_status_counts: dict[str, dict[str, int]],
+    xlsx_path: Path | None = None,
 ) -> None:
     print("Sending status counts to Teams webhook.")
     users_payload: dict[str, dict[str, int]] = {}
@@ -413,6 +418,13 @@ def send_status_counts_to_teams_webhook(
         "ukraine": ukraine_status_counts,
         "users": users_payload,
     }
+    if xlsx_path is not None:
+        payload["generated_xlsx"] = {
+            "file_name": xlsx_path.name,
+            "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "content_base64": b64encode(xlsx_path.read_bytes()).decode("ascii"),
+        }
+
     request = Request(
         TEAMS_WEBHOOK_URL,
         data=json.dumps(payload).encode("utf-8"),
@@ -621,13 +633,13 @@ def convert_csv_to_xlsx(csv_path: Path) -> Path:
     print_status_counts("CZ&SK", czsk_status_counts)
     print_status_counts("Ukraine", ukraine_status_counts)
     print_user_status_counts_table(user_status_counts)
-    send_status_counts_to_teams_webhook(
-        czsk_status_counts, ukraine_status_counts, user_status_counts
-    )
 
     xlsx_path = csv_path.with_name(build_output_filename())
     print(f"Saving XLSX file: {xlsx_path}")
     workbook.save(xlsx_path)
+    send_status_counts_to_teams_webhook(
+        czsk_status_counts, ukraine_status_counts, user_status_counts, xlsx_path
+    )
     print(f"Removing original CSV file: {csv_path}")
     csv_path.unlink()
     return xlsx_path

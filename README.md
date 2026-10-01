@@ -7,7 +7,8 @@ This automation does the following in order:
 3. Cleans, reorders, and filters the CSV columns.
 4. Splits the data into two Excel sheets: `CZ&SK` and `Ukraine`.
 5. Formats the workbook and saves the final `.xlsx` file.
-6. Deletes the original CSV and closes the browser.
+6. Sends status counts plus the generated `.xlsx` file to the Teams webhook.
+7. Deletes the original CSV and closes the browser.
 
 ## 1) Browser launch and page setup
 
