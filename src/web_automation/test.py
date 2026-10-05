@@ -18,14 +18,14 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
 JIRA_ISSUES_URL = "https://jira.metro.digital/login.jsp"
-CSV_DOWNLOAD_URL = "https://jira.metro.digital/sr/jira.issueviews:searchrequest-csv-current-fields/138300/SearchRequest-138300.csv"
+CSV_DOWNLOAD_URL = "https://jira.metro.digital/sr/jira.issueviews:searchrequest-csv-current-fields/139312/SearchRequest-139312.csv"
 MICROSOFT_EMAIL = "ashish.dake@metro-external.digital"
 
 # wave 3 team webhook url
 # TEAMS_WEBHOOK_URL = "https://default6432230809a947a38c1cb82871d605.68.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/20/workflows/289b83477c334aed8041ef10975684d9/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=Toz9PMhNqx7-S8EKXaIK7rUAbHTdYjQzWLUiXGmd4y8"
 
-# ashish webhook url
-TEAMS_WEBHOOK_URL = "https://default6432230809a947a38c1cb82871d605.68.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/04/workflows/041ce55e623a4412a3fe802a9f0b8d50/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=EdDbu5Nh7253cYA9m_OFbrPMqdniRkFKkrZilzr5D-8"
+# power automate flow : Jira unassigned 10 minute python flow
+TEAMS_WEBHOOK_URL = "https://default6432230809a947a38c1cb82871d605.68.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/14/workflows/b715481ef6ae45d99323d3d36130f9dd/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=bLsaX4ZkjWIRqZFtEsG5T-RlGRZdlMhqHfy34p7c4sE"
 
 COLUMNS_TO_REMOVE = {
     "Issue id",
@@ -80,6 +80,61 @@ USER_STATUS_REPORT_USERS = [
     "Rishabh Verma",
     "Pooja Malage",
 ]
+
+TARGET_TICKET_KEYS = [
+    "SDMCCCS-131025",
+    "SDMCCCS-130958",
+    "SDMCCCS-130900",
+    "SDMCCCS-130851",
+    "SDMCCCS-130752",
+    "SDMCCCS-130585",
+    "SDMCCCS-130071",
+    "SDMCCCS-129968",
+    "SDMCCCS-129985",
+    "SDMCCCS-130022",
+    "SDMCCCS-129937",
+    "SDMCCCS-129809",
+    "SDMCCCS-129077",
+    "SDMCCCS-129560",
+    "SDMCCCS-130366",
+    "SDMCCCS-129946",
+    "SDMCCCS-129927",
+    "SDMCCCS-129696",
+    "SDMCCCS-129131",
+    "SDMCCCS-129019",
+    "SDMCCCS-129462",
+    "SDMCCCS-130385",
+    "SDMCCCS-130951",
+    "SDMCCCS-130809",
+    "SDMCCCS-130614",
+    "SDMCCCS-130619",
+    "SDMCCCS-130938",
+    "SDMCCCS-130488",
+    "SDMCCCS-130476",
+    "SDMCCCS-130317",
+    "SDMCCCS-131059",
+    "SDMCCCS-131393",
+    "SDMCCCS-131366",
+    "SDMCCCS-131210",
+    "SDMCCCS-131208",
+    "SDMCCCS-131516",
+    "SDMCCCS-131623",
+    "SDMCCCS-131724",
+    "SDMCCCS-131723",
+    "SDMCCCS-131722",
+    "SDMCCCS-131773",
+    "SDMCCCS-131774",
+    "SDMCCCS-131973",
+    "SDMCCCS-131963",
+    "SDMCCCS-131965",
+    "SDMCCCS-132091",
+    "SDMCCCS-132149",
+]
+
+TICKET_KEY_ORDER = {
+    ticket_key: index for index, ticket_key in enumerate(TARGET_TICKET_KEYS)
+}
+TARGET_TICKET_KEY_SET = set(TARGET_TICKET_KEYS)
 
 
 def build_download_filename() -> str:
@@ -478,24 +533,13 @@ def format_worksheet(worksheet) -> None:
 def convert_csv_to_xlsx(csv_path: Path) -> Path:
     print(f"Converting CSV to XLSX: {csv_path}")
     workbook = Workbook()
-    czsk_sheet = workbook.active
-    czsk_sheet.title = "CZ&SK"
-    ukraine_sheet = workbook.create_sheet("Ukraine")
-    assignee_index: int | None = None
+    tickets_sheet = workbook.active
+    tickets_sheet.title = "Tickets"
     issue_key_index: int | None = None
-    project_name_index: int | None = None
-    product_index: int | None = None
-    status_index: int | None = None
-    solution_index: int | None = None
-    columns_to_remove_indexes: set[int] = set()
-    preferred_column_indexes: list[int] = []
-    labels_source_indexes: list[int] = []
-    labels_output_index: int | None = None
-    czsk_status_counts = create_status_counts()
-    ukraine_status_counts = create_status_counts()
-    user_status_counts = create_user_status_counts()
     rows_read = 0
-    rows_written = 0
+    data_rows_written = 0
+    matched_rows: list[list[str]] = []
+    found_ticket_keys: set[str] = set()
 
     with csv_path.open("r", encoding="utf-8-sig", newline="") as csv_file:
         for row_number, row in enumerate(reader(csv_file), start=1):
@@ -505,144 +549,53 @@ def convert_csv_to_xlsx(csv_path: Path) -> Path:
                 continue
 
             if row_number == 1:
-                columns_to_remove_indexes = build_columns_to_remove_indexes(row)
-                header_row = rename_columns(remove_columns(row, columns_to_remove_indexes))
-                header_indexes_by_name = build_column_indexes_by_name(header_row)
-                labels_source_indexes = header_indexes_by_name.get(
-                    LABELS_HEADER.lower(), []
-                ).copy()
-                preferred_column_indexes = build_preferred_column_indexes(
-                    header_row, PREFERRED_COLUMN_ORDER
-                )
-                filtered_row = reorder_row_by_indexes(header_row, preferred_column_indexes)
-                labels_output_index = next(
-                    (
-                        index
-                        for index, column_name in enumerate(filtered_row)
-                        if column_name.strip().lower() == LABELS_HEADER.lower()
-                    ),
-                    None,
-                )
-                project_name_index = next(
-                    (
-                        index
-                        for index, column_name in enumerate(filtered_row)
-                        if column_name.strip().lower() == PROJECT_NAME_HEADER.lower()
-                    ),
-                    None,
-                )
-                product_index = next(
-                    (
-                        index
-                        for index, column_name in enumerate(filtered_row)
-                        if column_name.strip().lower() == PRODUCT_HEADER.lower()
-                    ),
-                    None,
-                )
-                solution_index = next(
-                    (
-                        index
-                        for index, column_name in enumerate(filtered_row)
-                        if column_name.strip().lower() == SOLUTION_HEADER.lower()
-                    ),
-                    None,
-                )
                 issue_key_index = next(
                     (
                         index
-                        for index, column_name in enumerate(filtered_row)
+                        for index, column_name in enumerate(row)
                         if column_name.strip().lower() == ISSUE_KEY_HEADER.lower()
                     ),
                     None,
                 )
-                assignee_index = next(
-                    (
-                        index
-                        for index, column_name in enumerate(filtered_row)
-                        if column_name.strip().lower() == "assignee"
-                    ),
-                    None,
-                )
-                status_index = next(
-                    (
-                        index
-                        for index, column_name in enumerate(filtered_row)
-                        if column_name.strip().lower() == "status"
-                    ),
-                    None,
-                )
-                czsk_sheet.append(filtered_row)
-                ukraine_sheet.append(filtered_row)
-                rows_written += 1
+                if issue_key_index is None:
+                    raise RuntimeError("Issue key column not found in downloaded CSV header.")
+                tickets_sheet.append(row)
                 continue
 
-            transformed_row = rename_columns(remove_columns(row, columns_to_remove_indexes))
-            filtered_row = reorder_row_by_indexes(transformed_row, preferred_column_indexes)
-            if labels_output_index is not None and labels_output_index < len(filtered_row):
-                filtered_row[labels_output_index] = merge_columns_by_comma(
-                    transformed_row, labels_source_indexes
-                )
-            if not filtered_row:
-                continue
-
-            filtered_row = set_default_assignee(filtered_row, assignee_index)
-            if issue_key_index is None or issue_key_index >= len(filtered_row):
+            if issue_key_index is None or issue_key_index >= len(row):
                 print(
                     f"Skipping row {row_number} because Issue key column is not available in transformed row."
                 )
                 continue
 
-            issue_key = filtered_row[issue_key_index].strip()
+            issue_key = row[issue_key_index].strip().upper()
             if not issue_key:
                 print(f"Skipping row {row_number} because Issue key is empty.")
                 continue
 
-            if issue_key.startswith("SDMCCCS"):
-                print(f"Adding issue to CZ&SK sheet: {issue_key}")
-                czsk_sheet.append(filtered_row)
-                rows_written += 1
-                if has_assigned_owner(filtered_row, assignee_index):
-                    update_status_counts(filtered_row, status_index, czsk_status_counts)
-                    update_user_status_counts(
-                        filtered_row, assignee_index, status_index, user_status_counts
-                    )
-            elif issue_key.startswith("SDMCCUA"):
-                print(f"Adding issue to Ukraine sheet: {issue_key}")
-                ukraine_sheet.append(filtered_row)
-                rows_written += 1
-                if has_assigned_owner(filtered_row, assignee_index):
-                    update_status_counts(filtered_row, status_index, ukraine_status_counts)
-                    update_user_status_counts(
-                        filtered_row, assignee_index, status_index, user_status_counts
-                    )
-            else:
-                print(
-                    f"Issue key '{issue_key}' does not match supported project prefixes; "
-                    f"adding to CZ&SK as fallback."
-                )
-                czsk_sheet.append(filtered_row)
-                rows_written += 1
-                if has_assigned_owner(filtered_row, assignee_index):
-                    update_status_counts(filtered_row, status_index, czsk_status_counts)
-                    update_user_status_counts(
-                        filtered_row, assignee_index, status_index, user_status_counts
-                    )
+            if issue_key in TARGET_TICKET_KEY_SET:
+                matched_rows.append(row)
+                found_ticket_keys.add(issue_key)
+                data_rows_written += 1
 
     print(f"CSV rows read: {rows_read}")
-    print(f"Rows written to workbook: {rows_written}")
+    print(f"Matched ticket rows: {data_rows_written}")
 
-    format_worksheet(czsk_sheet)
-    format_worksheet(ukraine_sheet)
-    print_status_counts("CZ&SK", czsk_status_counts)
-    print_status_counts("Ukraine", ukraine_status_counts)
-    print_user_status_counts_table(user_status_counts)
+    matched_rows.sort(
+        key=lambda row: TICKET_KEY_ORDER.get(row[issue_key_index].strip().upper(), len(TARGET_TICKET_KEYS))
+    )
+    for matched_row in matched_rows:
+        tickets_sheet.append(matched_row)
+
+    missing_ticket_keys = [
+        ticket_key for ticket_key in TARGET_TICKET_KEYS if ticket_key not in found_ticket_keys
+    ]
+    if missing_ticket_keys:
+        print(f"Tickets not found in CSV ({len(missing_ticket_keys)}): {', '.join(missing_ticket_keys)}")
 
     xlsx_path = csv_path.with_name(build_output_filename())
     print(f"Saving XLSX file: {xlsx_path}")
     workbook.save(xlsx_path)
-    send_status_counts_to_teams_webhook(
-        czsk_status_counts, ukraine_status_counts, user_status_counts, xlsx_path
-    )
     print(f"Removing original CSV file: {csv_path}")
     csv_path.unlink()
     return xlsx_path

@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-from base64 import b64encode
-import json
 import sys
 from csv import reader
 from datetime import datetime
 from pathlib import Path
 import re
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from openpyxl import Workbook
@@ -18,11 +14,8 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
 JIRA_ISSUES_URL = "https://jira.metro.digital/login.jsp"
-CSV_DOWNLOAD_URL = "https://jira.metro.digital/sr/jira.issueviews:searchrequest-csv-current-fields/138300/SearchRequest-138300.csv"
+CSV_DOWNLOAD_URL = "https://jira.metro.digital/sr/jira.issueviews:searchrequest-csv-current-fields/139314/SearchRequest-139314.csv"
 MICROSOFT_EMAIL = "ashish.dake@metro-external.digital"
-
-# power automate flow : Daily ticket reporting - update ticket count from webhook
-TEAMS_WEBHOOK_URL = "https://default6432230809a947a38c1cb82871d605.68.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/04/workflows/041ce55e623a4412a3fe802a9f0b8d50/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=EdDbu5Nh7253cYA9m_OFbrPMqdniRkFKkrZilzr5D-8"
 
 COLUMNS_TO_REMOVE = {
     "Issue id",
@@ -78,6 +71,8 @@ USER_STATUS_REPORT_USERS = [
     "Pooja Malage",
 ]
 
+ISSUE_KEY_HEADERS = {"issue key", "key"}
+
 
 def build_download_filename() -> str:
     print("Building CSV download filename.")
@@ -87,8 +82,14 @@ def build_download_filename() -> str:
 
 def build_output_filename() -> str:
     print("Building XLSX output filename.")
-    today = datetime.now().strftime("%d-%b-%Y")
-    return f"Wave 3 Daily Tickets {today}.xlsx"
+    return f"Ticket dump.xlsx"
+
+
+def normalize_issue_key(value: str) -> str | None:
+    match = re.search(r"[A-Za-z]+-\d+", value)
+    if match is None:
+        return None
+    return match.group(0).upper()
 
 
 def is_jira_url(url: str) -> bool:
@@ -398,50 +399,6 @@ def print_user_status_counts_table(user_status_counts: dict[str, dict[str, int]]
     print(separator)
 
 
-def send_status_counts_to_teams_webhook(
-    czsk_status_counts: dict[str, int],
-    ukraine_status_counts: dict[str, int],
-    user_status_counts: dict[str, dict[str, int]],
-    xlsx_path: Path | None = None,
-) -> None:
-    print("Sending status counts to Teams webhook.")
-    users_payload: dict[str, dict[str, int]] = {}
-    for user_name, status_counts in user_status_counts.items():
-        users_payload[user_name] = {
-            **status_counts,
-            "eod_ticket_count": calculate_eod_ticket_count(status_counts),
-        }
-
-    payload = {
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "czsk": czsk_status_counts,
-        "ukraine": ukraine_status_counts,
-        "users": users_payload,
-    }
-    if xlsx_path is not None:
-        payload["generated_xlsx"] = {
-            "file_name": xlsx_path.name,
-            "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "content_base64": b64encode(xlsx_path.read_bytes()).decode("ascii"),
-        }
-
-    request = Request(
-        TEAMS_WEBHOOK_URL,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urlopen(request, timeout=30):
-            pass
-    except HTTPError as exc:
-        raise RuntimeError(
-            f"Teams webhook returned HTTP {exc.code}: {exc.reason}"
-        ) from exc
-    except URLError as exc:
-        raise RuntimeError(f"Teams webhook request failed: {exc.reason}") from exc
-
-
 def format_worksheet(worksheet) -> None:
     print(f"Formatting worksheet: {worksheet.title}")
     header_fill = PatternFill(fill_type="solid", fgColor="D9EAF7")
@@ -475,24 +432,15 @@ def format_worksheet(worksheet) -> None:
 def convert_csv_to_xlsx(csv_path: Path) -> Path:
     print(f"Converting CSV to XLSX: {csv_path}")
     workbook = Workbook()
-    czsk_sheet = workbook.active
-    czsk_sheet.title = "CZ&SK"
-    ukraine_sheet = workbook.create_sheet("Ukraine")
-    assignee_index: int | None = None
-    issue_key_index: int | None = None
-    project_name_index: int | None = None
-    product_index: int | None = None
-    status_index: int | None = None
-    solution_index: int | None = None
+    tickets_sheet = workbook.active
+    tickets_sheet.title = "Tickets"
     columns_to_remove_indexes: set[int] = set()
     preferred_column_indexes: list[int] = []
     labels_source_indexes: list[int] = []
     labels_output_index: int | None = None
-    czsk_status_counts = create_status_counts()
-    ukraine_status_counts = create_status_counts()
-    user_status_counts = create_user_status_counts()
+    issue_key_index: int | None = None
     rows_read = 0
-    rows_written = 0
+    data_rows_written = 0
 
     with csv_path.open("r", encoding="utf-8-sig", newline="") as csv_file:
         for row_number, row in enumerate(reader(csv_file), start=1):
@@ -511,66 +459,28 @@ def convert_csv_to_xlsx(csv_path: Path) -> Path:
                 preferred_column_indexes = build_preferred_column_indexes(
                     header_row, PREFERRED_COLUMN_ORDER
                 )
-                filtered_row = reorder_row_by_indexes(header_row, preferred_column_indexes)
+                filtered_header_row = reorder_row_by_indexes(
+                    header_row, preferred_column_indexes
+                )
                 labels_output_index = next(
                     (
                         index
-                        for index, column_name in enumerate(filtered_row)
+                        for index, column_name in enumerate(filtered_header_row)
                         if column_name.strip().lower() == LABELS_HEADER.lower()
-                    ),
-                    None,
-                )
-                project_name_index = next(
-                    (
-                        index
-                        for index, column_name in enumerate(filtered_row)
-                        if column_name.strip().lower() == PROJECT_NAME_HEADER.lower()
-                    ),
-                    None,
-                )
-                product_index = next(
-                    (
-                        index
-                        for index, column_name in enumerate(filtered_row)
-                        if column_name.strip().lower() == PRODUCT_HEADER.lower()
-                    ),
-                    None,
-                )
-                solution_index = next(
-                    (
-                        index
-                        for index, column_name in enumerate(filtered_row)
-                        if column_name.strip().lower() == SOLUTION_HEADER.lower()
                     ),
                     None,
                 )
                 issue_key_index = next(
                     (
                         index
-                        for index, column_name in enumerate(filtered_row)
-                        if column_name.strip().lower() == ISSUE_KEY_HEADER.lower()
+                        for index, column_name in enumerate(filtered_header_row)
+                        if column_name.strip().lower() in ISSUE_KEY_HEADERS
                     ),
                     None,
                 )
-                assignee_index = next(
-                    (
-                        index
-                        for index, column_name in enumerate(filtered_row)
-                        if column_name.strip().lower() == "assignee"
-                    ),
-                    None,
-                )
-                status_index = next(
-                    (
-                        index
-                        for index, column_name in enumerate(filtered_row)
-                        if column_name.strip().lower() == "status"
-                    ),
-                    None,
-                )
-                czsk_sheet.append(filtered_row)
-                ukraine_sheet.append(filtered_row)
-                rows_written += 1
+                if issue_key_index is None:
+                    raise RuntimeError("Issue key column not found in downloaded CSV header.")
+                tickets_sheet.append(filtered_header_row)
                 continue
 
             transformed_row = rename_columns(remove_columns(row, columns_to_remove_indexes))
@@ -579,67 +489,28 @@ def convert_csv_to_xlsx(csv_path: Path) -> Path:
                 filtered_row[labels_output_index] = merge_columns_by_comma(
                     transformed_row, labels_source_indexes
                 )
-            if not filtered_row:
-                continue
 
-            filtered_row = set_default_assignee(filtered_row, assignee_index)
             if issue_key_index is None or issue_key_index >= len(filtered_row):
                 print(
                     f"Skipping row {row_number} because Issue key column is not available in transformed row."
                 )
                 continue
 
-            issue_key = filtered_row[issue_key_index].strip()
-            if not issue_key:
+            issue_key = normalize_issue_key(filtered_row[issue_key_index].strip())
+            if issue_key is None:
                 print(f"Skipping row {row_number} because Issue key is empty.")
                 continue
 
-            if issue_key.startswith("SDMCCCS"):
-                print(f"Adding issue to CZ&SK sheet: {issue_key}")
-                czsk_sheet.append(filtered_row)
-                rows_written += 1
-                if has_assigned_owner(filtered_row, assignee_index):
-                    update_status_counts(filtered_row, status_index, czsk_status_counts)
-                    update_user_status_counts(
-                        filtered_row, assignee_index, status_index, user_status_counts
-                    )
-            elif issue_key.startswith("SDMCCUA"):
-                print(f"Adding issue to Ukraine sheet: {issue_key}")
-                ukraine_sheet.append(filtered_row)
-                rows_written += 1
-                if has_assigned_owner(filtered_row, assignee_index):
-                    update_status_counts(filtered_row, status_index, ukraine_status_counts)
-                    update_user_status_counts(
-                        filtered_row, assignee_index, status_index, user_status_counts
-                    )
-            else:
-                print(
-                    f"Issue key '{issue_key}' does not match supported project prefixes; "
-                    f"adding to CZ&SK as fallback."
-                )
-                czsk_sheet.append(filtered_row)
-                rows_written += 1
-                if has_assigned_owner(filtered_row, assignee_index):
-                    update_status_counts(filtered_row, status_index, czsk_status_counts)
-                    update_user_status_counts(
-                        filtered_row, assignee_index, status_index, user_status_counts
-                    )
+            tickets_sheet.append(filtered_row)
+            data_rows_written += 1
 
     print(f"CSV rows read: {rows_read}")
-    print(f"Rows written to workbook: {rows_written}")
+    print(f"Rows written to ticket dump: {data_rows_written}")
 
-    format_worksheet(czsk_sheet)
-    format_worksheet(ukraine_sheet)
-    print_status_counts("CZ&SK", czsk_status_counts)
-    print_status_counts("Ukraine", ukraine_status_counts)
-    print_user_status_counts_table(user_status_counts)
-
+    format_worksheet(tickets_sheet)
     xlsx_path = csv_path.with_name(build_output_filename())
     print(f"Saving XLSX file: {xlsx_path}")
     workbook.save(xlsx_path)
-    send_status_counts_to_teams_webhook(
-        czsk_status_counts, ukraine_status_counts, user_status_counts, xlsx_path
-    )
     print(f"Removing original CSV file: {csv_path}")
     csv_path.unlink()
     return xlsx_path
@@ -733,6 +604,7 @@ def download_csv(page) -> Path:
     file_name = build_download_filename()
     temp_file = download_dir / f"{uuid4()}-{file_name}"
 
+    print("Downloading CSV using Jira filter 139314.")
     with page.expect_download() as download_info:
         page.evaluate("url => window.location.href = url", CSV_DOWNLOAD_URL)
 
