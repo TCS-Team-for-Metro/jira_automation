@@ -76,6 +76,8 @@ USER_STATUS_REPORT_USERS = [
     "Namrata Shandilya",
     "Rishabh Verma",
     "Pooja Malage",
+    "Pooja Lambole",
+    "Dipali Kadam"
 ]
 
 
