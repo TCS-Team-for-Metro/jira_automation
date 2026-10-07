@@ -328,3 +328,27 @@ This is the final shutdown step for the automation run.
 Raw Jira export -> `download_csv(page)` -> CSV file on disk -> `convert_csv_to_xlsx(csv_path)` -> `build_columns_to_remove_indexes(...)` -> `filter_row(...)` -> `rename_headers(...)` -> `move_project_name_to_start(...)` -> `swap_product_and_solution(...)` -> `set_default_assignee(...)` -> `has_assigned_owner(...)` -> `update_status_counts(...)` -> `format_worksheet(...)` -> final `.xlsx` -> `csv_path.unlink()` -> `browser.close()`
 
 This is the complete flow of the data from the browser open through the final generated Excel file.
+
+## Install and run on local machine (Windows)
+
+1. Install Python 3.11+ and `uv`.
+2. Clone the repository and move into it:
+   `git clone <repo-url>`
+   `cd web_automation`
+3. Create/activate the virtual environment and install dependencies:
+   `uv sync`
+4. Install Playwright Chromium browser:
+   `uv run playwright install chromium`
+5. Create `.env` in the repository root and add all required webhook variables:
+   - `TEAMS_WEBHOOK_JIRA_BLOCKER_CRITICAL_30MIN`
+   - `TEAMS_WEBHOOK_JIRA_UNASSIGNED_10MIN`
+   - `TEAMS_WEBHOOK_JIRA_UNLABELED_30MIN`
+   - `TEAMS_WEBHOOK_SEND_REPORT_TO_EXCEL_AND_TEAMS`
+   - `TEAMS_WEBHOOK_UPDATE_DAILY_REPORTING_EXCEL_1710`
+   - `TEAMS_WEBHOOK_TEST`
+6. Run any required automation script:
+   - `uv run python src\web_automation\send-report-to-excel-and-teams-workflow.py`
+   - `uv run python src\web_automation\update-daily-reporting-excel-at-1710.py`
+   - `uv run python src\web_automation\Jira-unassigned-10-minute-python-flow.py`
+   - `uv run python src\web_automation\Jira-unlabeled-tickets-30-minute-python-flow.py`
+   - `uv run python src\web_automation\Jira-blocker-critical-30-minute-python-flow.py`

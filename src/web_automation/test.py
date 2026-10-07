@@ -16,16 +16,16 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
+try:
+    from .env_config import get_required_env
+except ImportError:
+    from env_config import get_required_env
 
 JIRA_ISSUES_URL = "https://jira.metro.digital/login.jsp"
 CSV_DOWNLOAD_URL = "https://jira.metro.digital/sr/jira.issueviews:searchrequest-csv-current-fields/139312/SearchRequest-139312.csv"
 MICROSOFT_EMAIL = "ashish.dake@metro-external.digital"
 
-# wave 3 team webhook url
-# TEAMS_WEBHOOK_URL = "https://default6432230809a947a38c1cb82871d605.68.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/20/workflows/289b83477c334aed8041ef10975684d9/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=Toz9PMhNqx7-S8EKXaIK7rUAbHTdYjQzWLUiXGmd4y8"
-
-# power automate flow : Jira unassigned 10 minute python flow
-TEAMS_WEBHOOK_URL = "https://default6432230809a947a38c1cb82871d605.68.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/14/workflows/b715481ef6ae45d99323d3d36130f9dd/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=bLsaX4ZkjWIRqZFtEsG5T-RlGRZdlMhqHfy34p7c4sE"
+TEAMS_WEBHOOK_URL = get_required_env("TEAMS_WEBHOOK_TEST")
 
 COLUMNS_TO_REMOVE = {
     "Issue id",

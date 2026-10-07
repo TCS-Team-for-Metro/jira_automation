@@ -11,13 +11,16 @@ from uuid import uuid4
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
+try:
+    from .env_config import get_required_env
+except ImportError:
+    from env_config import get_required_env
 
 JIRA_ISSUES_URL = "https://jira.metro.digital/login.jsp"
 CSV_DOWNLOAD_URL = "https://jira.metro.digital/sr/jira.issueviews:searchrequest-csv-current-fields/139211/SearchRequest-139211.csv"
 MICROSOFT_EMAIL = "ashish.dake@metro-external.digital"
 
-# power automate flow : Jira unlabeled 30 minute python flow
-TEAMS_WEBHOOK_URL = "https://default6432230809a947a38c1cb82871d605.68.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/19/workflows/5ba2cd2ba42f4ba78c055e0365a07517/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=O79ugUWu8bMoOkKWHcER42xdxnHVzx9eJiWY--eOTXc"
+TEAMS_WEBHOOK_URL = get_required_env("TEAMS_WEBHOOK_JIRA_UNLABELED_30MIN")
 
 def build_download_filename() -> str:
     print("Building CSV download filename.")

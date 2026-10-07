@@ -16,13 +16,16 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
+try:
+    from .env_config import get_required_env
+except ImportError:
+    from env_config import get_required_env
 
 JIRA_ISSUES_URL = "https://jira.metro.digital/login.jsp"
 CSV_DOWNLOAD_URL = "https://jira.metro.digital/sr/jira.issueviews:searchrequest-csv-current-fields/138300/SearchRequest-138300.csv"
 MICROSOFT_EMAIL = "ashish.dake@metro-external.digital"
 
-# power automate flow : Daily ticket reporting - update ticket count from webhook
-TEAMS_WEBHOOK_URL = "https://default6432230809a947a38c1cb82871d605.68.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/04/workflows/041ce55e623a4412a3fe802a9f0b8d50/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=EdDbu5Nh7253cYA9m_OFbrPMqdniRkFKkrZilzr5D-8"
+TEAMS_WEBHOOK_URL = get_required_env("TEAMS_WEBHOOK_UPDATE_DAILY_REPORTING_EXCEL_1710")
 
 COLUMNS_TO_REMOVE = {
     "Issue id",
